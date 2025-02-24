@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { FaSpinner, FaEye, FaEyeSlash } from 'react-icons/fa';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from './firebase';
-import { Container, Row, Col, Card, Form, Button, Modal } from 'react-bootstrap';
+import { Container, Row, Col, Card, Form, Button } from 'react-bootstrap';
 
 const AuthComponent = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -13,7 +13,7 @@ const AuthComponent = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [resetMessage, setResetMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState(''); // Renamed from resetMessage for clarity
   const [theme, setTheme] = useState('light');
   const { signup, login } = useAuth();
   const navigate = useNavigate();
@@ -46,36 +46,55 @@ const AuthComponent = () => {
   };
 
   useEffect(() => {
-    // Sync with sidebar theme if present
     const bodyTheme = document.body.getAttribute('data-theme') || 'light';
     setTheme(bodyTheme);
   }, []);
 
   const getErrorMessage = (error) => {
-    if (error.code === 'auth/user-not-found') return 'No user found with this email address.';
-    if (error.code === 'auth/wrong-password') return 'Incorrect password. Please try again.';
-    if (error.code === 'auth/email-already-in-use') return 'An account with this email already exists.';
-    if (error.code === 'auth/weak-password') return 'Password should be at least 6 characters long.';
-    if (error.code === 'auth/invalid-email') return 'Please enter a valid email address.';
-    if (error.code === 'auth/too-many-requests') return 'Too many attempts. Please try again later.';
-    return 'An error occurred. Please try again.';
+    console.log('Error code:', error.code, 'Error message:', error.message);
+    switch (error.code) {
+      case 'auth/user-not-found':
+        return 'No account exists with this email. Please sign up first.';
+      case 'auth/wrong-password':
+        return 'Incorrect password. Please try again.';
+      case 'auth/email-already-in-use':
+        return 'An account with this email already exists. Please sign in.';
+      case 'auth/weak-password':
+        return 'Password must be at least 6 characters long.';
+      case 'auth/invalid-email':
+        return 'Please enter a valid email address.';
+      case 'auth/too-many-requests':
+        return 'Too many attempts. Please try again later.';
+      case 'auth/operation-not-allowed':
+        return 'Email/password signup is not enabled. Contact support.';
+      case 'auth/network-request-failed':
+        return 'Network error. Please check your connection and try again.';
+      case 'auth/invalid-credential':
+        return 'Invalid credentials provided.';
+      default:
+        return `An unexpected error occurred: ${error.message}. Please try again.`;
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setResetMessage('');
+    setSuccessMessage('');
     setIsLoading(true);
 
     try {
       if (isLogin) {
         await login(email, password);
+        navigate('/dashboard'); // Redirect only on successful login
       } else {
         await signup(email, password);
+        setSuccessMessage('Account created successfully! Please sign in to access the system.');
+        setIsLogin(true); // Switch to login mode after signup
+        setEmail(''); // Clear form
+        setPassword('');
       }
-      navigate('/dashboard');
     } catch (error) {
-      console.error('Auth error:', error);
+      console.error('Auth error details:', error.code, error.message);
       setError(getErrorMessage(error));
     } finally {
       setIsLoading(false);
@@ -90,12 +109,12 @@ const AuthComponent = () => {
       return;
     }
     setError('');
-    setResetMessage('');
+    setSuccessMessage('');
     setIsLoading(true);
 
     try {
       await sendPasswordResetEmail(auth, email);
-      setResetMessage('Password reset email sent! Check your inbox.');
+      setSuccessMessage('Password reset email sent! Check your inbox.');
     } catch (error) {
       console.error('Password reset error:', error);
       setError(getErrorMessage(error));
@@ -109,25 +128,16 @@ const AuthComponent = () => {
       fluid 
       className="auth-container animate__animated animate__zoomIn" 
       style={{ 
-        minHeight: '100vh',
-        background: `linear-gradient(135deg, ${chartColors[theme].gradientStart}, ${chartColors[theme].gradientEnd})`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-        transition: 'all 0.3s ease'
+        minHeight: '100vh', 
+        background: `linear-gradient(135deg, ${chartColors[theme].gradientStart}, ${chartColors[theme].gradientEnd})`, 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        padding: '20px', 
+        transition: 'all 0.3s ease' 
       }}
     >
-      {/* Dynamic Background Particles */}
-      <div className="particles" style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        zIndex: 0
-      }}>
+      <div className="particles" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }}>
         <div className="particle" style={{ animation: 'float 5s ease-in-out infinite' }}></div>
         <div className="particle" style={{ animation: 'float 6s ease-in-out infinite 1s' }}></div>
         <div className="particle" style={{ animation: 'float 7s ease-in-out infinite 2s' }}></div>
@@ -136,35 +146,35 @@ const AuthComponent = () => {
       <Row className="justify-content-center w-100">
         <Col md={6} lg={4}>
           <Card 
-            className="shadow-lg border-0 animate__animated animate__pulse"
+            className="shadow-lg border-0 animate__animated animate__pulse" 
             style={{ 
-              background: chartColors[theme].card,
-              borderRadius: '20px',
-              overflow: 'hidden',
-              position: 'relative',
-              boxShadow: `0 10px 30px ${chartColors[theme].text}22`,
-              zIndex: 1
+              background: chartColors[theme].card, 
+              borderRadius: '20px', 
+              overflow: 'hidden', 
+              position: 'relative', 
+              boxShadow: `0 10px 30px ${chartColors[theme].text}22`, 
+              zIndex: 1 
             }}
           >
             <Card.Body className="p-5">
               <div className="text-center mb-4">
                 <h1 
-                  className="h3 mb-3 d-flex align-items-center justify-content-center"
+                  className="h3 mb-3 d-flex align-items-center justify-content-center" 
                   style={{ 
-                    color: chartColors[theme].text,
-                    textShadow: `0 2px 4px ${chartColors[theme].text}33`,
-                    animation: 'pulseText 2s infinite'
+                    color: chartColors[theme].text, 
+                    textShadow: `0 2px 4px ${chartColors[theme].text}33`, 
+                    animation: 'pulseText 2s infinite' 
                   }}
                 >
                   <span className="logo me-2" style={{ fontSize: '2rem', color: chartColors[theme].primary }}>🦷</span>
                   Berkshire Dental Clinic
                 </h1>
                 <p 
-                  className="text-muted"
+                  className="text-muted" 
                   style={{ 
-                    color: `${chartColors[theme].text}99`,
-                    fontSize: '1.1rem',
-                    letterSpacing: '1px'
+                    color: `${chartColors[theme].text}99`, 
+                    fontSize: '1.1rem', 
+                    letterSpacing: '1px' 
                   }}
                 >
                   {isLogin ? 'Welcome Back' : 'Join Our Team'}
@@ -174,19 +184,27 @@ const AuthComponent = () => {
               {error && (
                 <div 
                   className="alert alert-danger animate__animated animate__shakeX" 
-                  role="alert"
-                  style={{ borderRadius: '10px', background: `${chartColors[theme].status?.[0] || '#dc3545'}33`, color: chartColors[theme].text }}
+                  role="alert" 
+                  style={{ 
+                    borderRadius: '10px', 
+                    background: `${chartColors[theme].primary}33`, 
+                    color: chartColors[theme].text 
+                  }}
                 >
                   {error}
                 </div>
               )}
-              {resetMessage && (
+              {successMessage && (
                 <div 
                   className="alert alert-success animate__animated animate__bounceIn" 
-                  role="alert"
-                  style={{ borderRadius: '10px', background: `${chartColors[theme].status?.[1] || '#28a745'}33`, color: chartColors[theme].text }}
+                  role="alert" 
+                  style={{ 
+                    borderRadius: '10px', 
+                    background: `${chartColors[theme].primary}33`, 
+                    color: chartColors[theme].text 
+                  }}
                 >
-                  {resetMessage}
+                  {successMessage}
                 </div>
               )}
 
@@ -261,10 +279,7 @@ const AuthComponent = () => {
                       className="text-decoration-none futuristic-btn"
                       onClick={handleForgotPassword}
                       disabled={isLoading}
-                      style={{ 
-                        color: chartColors[theme].primary,
-                        transition: 'all 0.3s ease'
-                      }}
+                      style={{ color: chartColors[theme].primary, transition: 'all 0.3s ease' }}
                     >
                       Forgot Password?
                     </Button>
@@ -302,17 +317,12 @@ const AuthComponent = () => {
                     onClick={() => {
                       setIsLogin(!isLogin);
                       setError('');
-                      setResetMessage('');
+                      setSuccessMessage('');
                     }}
                     disabled={isLoading}
-                    style={{ 
-                      color: chartColors[theme].primary,
-                      transition: 'all 0.3s ease'
-                    }}
+                    style={{ color: chartColors[theme].primary, transition: 'all 0.3s ease' }}
                   >
-                    {isLogin 
-                      ? "Don't have an account? Sign Up" 
-                      : 'Already have an account? Sign In'}
+                    {isLogin ? "Don't have an account? Sign Up" : 'Already have an account? Sign In'}
                   </Button>
                 </p>
               </Form>

@@ -4,8 +4,8 @@ import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Toolti
 import annotationPlugin from 'chartjs-plugin-annotation';
 import { db } from './firebase';
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
-import { Container, Row, Col, Card, Form, Button, Modal, Dropdown } from 'react-bootstrap';
-import { FaTachometerAlt, FaDownload, FaChartBar, FaMoneyBillWave, FaCalendarCheck, FaUserMd, FaChartLine, FaCog, FaMapMarkerAlt, FaStar, FaClock, FaDesktop, FaPalette } from 'react-icons/fa';
+import { Container, Row, Col, Card, Form, Button, Modal } from 'react-bootstrap';
+import { FaTachometerAlt, FaDownload, FaChartBar, FaMoneyBillWave, FaCalendarCheck, FaUserMd, FaCog, FaMapMarkerAlt, FaStar, FaClock, FaDesktop, FaPalette } from 'react-icons/fa';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import 'animate.css';
@@ -177,7 +177,6 @@ const DashboardComponent = () => {
   const statusChartData = () => {
     const attendedCount = filteredAppointments.filter(a => a.paymentStatus === 'Attended').length;
     const unattendedCount = filteredAppointments.filter(a => a.paymentStatus === 'Unattended').length;
-    const total = attendedCount + unattendedCount;
 
     return {
       labels: ['Attended', 'Unattended'],
@@ -437,53 +436,76 @@ const DashboardComponent = () => {
             <FaTachometerAlt className="me-2" style={{ fontSize: '28px' }} /> 
             <span>Berkshire Dental Clinic Dashboard</span>
           </h4>
-          <div className="d-flex justify-content-between gap-2 flex-wrap">
-            <div className="icon-label-wrapper">
-              <Form.Select
-                value={timeFilter}
-                onChange={(e) => setTimeFilter(e.target.value)}
-                className="rounded-pill shadow-sm futuristic-select"
-                style={{ 
-                  width: '120px', 
-                  fontSize: '12px', 
-                  padding: '8px 12px',
-                  background: `linear-gradient(45deg, ${chartColors[theme].card}, ${chartColors[theme].gradientStart}88)`,
-                  color: chartColors[theme].text,
-                  border: 'none',
-                  boxShadow: `0 0 10px ${chartColors[theme].text}33`,
-                  transition: 'all 0.3s ease'
-                }}
-              >
-                <option value="All">All</option>
-                <option value="Today">Today</option>
-                <option value="This Week">Week</option>
-                <option value="This Month">Month</option>
-              </Form.Select>
-              <span className="icon-label">Time Filter</span>
+
+          {/* Horizontal Filter Bar */}
+          <div className="filter-bar d-flex align-items-center gap-3 flex-wrap" style={{ overflowX: 'auto', paddingBottom: '5px' }}>
+            {/* Date Filters */}
+            <div className="filter-group d-flex align-items-center gap-2">
+              <span className="filter-label" style={{ color: chartColors[theme].text, fontSize: '12px', fontWeight: 500 }}>
+                <FaCalendarCheck className="me-1" /> Date:
+              </span>
+              {[
+                { label: 'Today', value: 'Today' },
+                { label: 'Week', value: 'This Week' },
+                { label: 'Month', value: 'This Month' },
+                { label: 'All', value: 'All' }
+              ].map((option) => (
+                <Button
+                  key={option.value}
+                  variant={timeFilter === option.value ? 'primary' : 'outline-primary'}
+                  className="filter-btn rounded-pill shadow-sm"
+                  onClick={() => setTimeFilter(option.value)}
+                  style={{
+                    fontSize: '12px',
+                    padding: '6px 12px',
+                    background: timeFilter === option.value 
+                      ? chartColors[theme].revenue 
+                      : `${chartColors[theme].card}aa`,
+                    border: `1px solid ${chartColors[theme].revenue}`,
+                    color: timeFilter === option.value ? '#fff' : chartColors[theme].text,
+                    transition: 'all 0.3s ease',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {option.label}
+                  <span className="filter-hover-effect" />
+                </Button>
+              ))}
             </div>
-            <div className="icon-label-wrapper">
-              <Form.Select
-                value={locationFilter}
-                onChange={(e) => setLocationFilter(e.target.value)}
-                className="rounded-pill shadow-sm futuristic-select"
-                style={{ 
-                  width: '120px', 
-                  fontSize: '12px', 
-                  padding: '8px 12px',
-                  background: `linear-gradient(45deg, ${chartColors[theme].card}, ${chartColors[theme].gradientStart}88)`,
-                  color: chartColors[theme].text,
-                  border: 'none',
-                  boxShadow: `0 0 10px ${chartColors[theme].text}33`,
-                  transition: 'all 0.3s ease'
-                }}
-              >
-                {locations.map((loc) => (
-                  <option key={loc} value={loc}>{loc}</option>
-                ))}
-              </Form.Select>
-              <span className="icon-label">Location</span>
+
+            {/* Location Filters */}
+            <div className="filter-group d-flex align-items-center gap-2">
+              <span className="filter-label" style={{ color: chartColors[theme].text, fontSize: '12px', fontWeight: 500 }}>
+                <FaMapMarkerAlt className="me-1" /> Location:
+              </span>
+              {locations.map((loc) => (
+                <Button
+                  key={loc}
+                  variant={locationFilter === loc ? 'primary' : 'outline-primary'}
+                  className="filter-btn rounded-pill shadow-sm"
+                  onClick={() => setLocationFilter(loc)}
+                  style={{
+                    fontSize: '12px',
+                    padding: '6px 12px',
+                    background: locationFilter === loc 
+                      ? chartColors[theme].location[locations.indexOf(loc) % 4 || 0] 
+                      : `${chartColors[theme].card}aa`,
+                    border: `1px solid ${chartColors[theme].location[locations.indexOf(loc) % 4 || 0]}`,
+                    color: locationFilter === loc ? '#fff' : chartColors[theme].text,
+                    transition: 'all 0.3s ease',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {loc === 'All' ? 'All' : loc.split('-')[0]}
+                  <span className="filter-hover-effect" />
+                </Button>
+              ))}
             </div>
-            <div className="icon-label-wrapper">
+
+            {/* Action Buttons */}
+            <div className="action-group d-flex gap-2 ms-auto">
               <Button 
                 variant="outline-success" 
                 className="rounded-pill shadow-sm futuristic-btn"
@@ -498,11 +520,8 @@ const DashboardComponent = () => {
                   transition: 'all 0.3s ease'
                 }}
               >
-                <FaDownload />
+                <FaDownload /> Export
               </Button>
-              <span className="icon-label">Export</span>
-            </div>
-            <div className="icon-label-wrapper">
               <Button 
                 variant="outline-secondary" 
                 className="rounded-pill shadow-sm futuristic-btn"
@@ -517,11 +536,8 @@ const DashboardComponent = () => {
                   transition: 'all 0.3s ease'
                 }}
               >
-                <FaCog />
+                <FaCog /> Settings
               </Button>
-              <span className="icon-label">Settings</span>
-            </div>
-            <div className="icon-label-wrapper">
               <Button 
                 variant="outline-primary" 
                 className="rounded-pill shadow-sm futuristic-btn"
@@ -538,10 +554,11 @@ const DashboardComponent = () => {
               >
                 <FaPalette /> {themes[theme].icon}
               </Button>
-              <span className="icon-label">Themes</span>
             </div>
           </div>
         </Col>
+
+        {/* KPI Cards */}
         {[
           { icon: FaChartBar, title: 'Appointments', value: totalAppointments, color: chartColors[theme].location[0] },
           { icon: FaMoneyBillWave, title: 'Revenue', value: `KSh ${totalRevenue.toLocaleString()}`, color: chartColors[theme].revenue },
@@ -958,15 +975,15 @@ const DashboardComponent = () => {
             color: ${chartColors[theme].text}; 
             transition: all 0.3s ease;
           }
-          .futuristic-select, .futuristic-btn {
+          .futuristic-btn {
             position: relative;
             overflow: hidden;
           }
-          .futuristic-select:hover, .futuristic-btn:hover { 
+          .futuristic-btn:hover { 
             transform: scale(1.05); 
             box-shadow: 0 0 15px ${chartColors[theme].text}66;
           }
-          .futuristic-btn::after, .futuristic-select::after {
+          .futuristic-btn::after {
             content: '';
             position: absolute;
             top: 50%;
@@ -978,22 +995,9 @@ const DashboardComponent = () => {
             transform: translate(-50%, -50%);
             transition: width 0.6s ease, height 0.6s ease;
           }
-          .futuristic-btn:hover::after, .futuristic-select:hover::after {
+          .futuristic-btn:hover::after {
             width: 200%;
             height: 200%;
-          }
-          .icon-label-wrapper {
-            position: relative;
-            display: inline-flex;
-            flex-direction: column;
-            align-items: center;
-          }
-          .icon-label {
-            font-size: 10px;
-            color: ${chartColors[theme].text}cc;
-            margin-top: 5px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
           }
           .particles .particle {
             position: absolute;
@@ -1039,6 +1043,52 @@ const DashboardComponent = () => {
           ::-webkit-scrollbar-thumb { background: ${chartColors[theme].text}66; border-radius: 5px; }
           .badge { transition: transform 0.2s ease; }
           .badge:hover { transform: scale(1.1); }
+          .filter-bar {
+            background: ${chartColors[theme].card}cc;
+            border-radius: 25px;
+            padding: 10px 15px;
+            box-shadow: 0 5px 15px ${chartColors[theme].text}22;
+            white-space: nowrap;
+          }
+          .filter-group {
+            position: relative;
+          }
+          .filter-btn {
+            z-index: 1;
+          }
+          .filter-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 12px ${chartColors[theme].revenue}66;
+          }
+          .filter-hover-effect {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.4s ease, height 0.4s ease;
+          }
+          .filter-btn:hover .filter-hover-effect {
+            width: 200%;
+            height: 200%;
+          }
+          .filter-label {
+            text-transform: uppercase;
+            letter-spacing: 1px;
+          }
+          .filter-bar::-webkit-scrollbar {
+            height: 5px;
+          }
+          .filter-bar::-webkit-scrollbar-thumb {
+            background: ${chartColors[theme].revenue}66;
+            border-radius: 5px;
+          }
+          .action-group .futuristic-btn {
+            min-width: 100px;
+          }
         `}
       </style>
     </Container>
