@@ -7,6 +7,7 @@ import 'react-toastify/dist/ReactToastify.css';
 
 const PaymentManagerComponent = () => {
   const [appointments, setAppointments] = useState([]);
+  const [patients, setPatients] = useState([]); // To store patient attendance data
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
   const [isLoading, setIsLoading] = useState(false);
@@ -20,19 +21,17 @@ const PaymentManagerComponent = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
 
-  // Format date to "February 22, 2025 at 1:17:44 PM"
+  // Format date to "March 5, 2025 at 2:30:45 PM"
   const formatDate = (timestamp) => {
     if (!timestamp) return '';
-    // Handle custom string format from database: "February 22 at 2025 at 1:17:44 PM"
     if (typeof timestamp === 'string' && timestamp.includes(' at ')) {
       const parts = timestamp.split(' at ');
       if (parts.length === 3) {
         const [monthDay, year, time] = parts;
-        return `${monthDay}, ${year} at ${time}`; // Normalize to "February 22, 2025 at 1:17:44 PM"
+        return `${monthDay}, ${year} at ${time}`;
       }
-      return timestamp; // Return as-is if not matching expected format
+      return timestamp;
     }
-    // Handle Firestore Timestamp or ISO string
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     if (isNaN(date.getTime())) {
       console.warn(`Invalid date detected: ${timestamp}`);
@@ -46,39 +45,79 @@ const PaymentManagerComponent = () => {
       minute: 'numeric',
       second: 'numeric',
       hour12: true,
-      timeZone: 'Africa/Nairobi', // UTC+3
+      timeZone: 'Africa/Nairobi',
     };
     return date.toLocaleString('en-US', options).replace(/,/, ' at');
   };
 
-  // Fetch appointments and convert timestamps
+  // Fetch appointments and patient records
   useEffect(() => {
-    const fetchAppointments = async () => {
+    const fetchData = async () => {
       setIsLoading(true);
       try {
-        const querySnapshot = await getDocs(collection(db, 'bershire dental records'));
-        const data = querySnapshot.docs.map((doc) => {
+        // Fetch appointments
+        const appointmentSnapshot = await getDocs(collection(db, 'bershire dental records'));
+        const appointmentData = appointmentSnapshot.docs.map((doc) => {
           const docData = doc.data();
-          const paymentStatus = docData.paymentStatus === 'Attended' ? 'Attended' : 'Unattended';
           return {
             id: doc.id,
             ...docData,
             paymentHistory: (docData.paymentHistory || []).map((payment) => ({
               ...payment,
-              date: formatDate(payment.date), // Format payment history dates
+              date: formatDate(payment.date),
             })),
-            paymentDate: docData.paymentDate ? formatDate(docData.paymentDate) : null, // Format payment date
-            paymentStatus,
+            paymentDate: docData.paymentDate ? formatDate(docData.paymentDate) : null,
           };
         });
-        setAppointments(data);
+
+        // Fetch patient records for attendance status
+        const patientSnapshot = await getDocs(collection(db, 'patient_records'));
+        const patientData = patientSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          name: doc.data().name,
+          attended: doc.data().attended || false,
+        }));
+        setPatients(patientData);
+
+        // Combine appointment and patient data to determine status
+        const enrichedAppointments = appointmentData.map((appointment) => {
+          const patient = patientData.find((p) => p.name === appointment.patientName);
+          const paidSoFar = (appointment.paymentHistory || []).reduce((sum, p) => sum + p.amount, 0) || 0;
+          const totalAmount = appointment.payment || 0;
+          const paymentProgress = paidSoFar / totalAmount;
+          const attendanceStatus = patient ? (patient.attended ? 'Fully Attended' : 'Not Attended') : 'Not Attended';
+          let paymentStatus;
+
+          if (totalAmount === 0) {
+            paymentStatus = 'No Payment Required';
+          } else if (paidSoFar === 0) {
+            paymentStatus = 'Unpaid';
+          } else if (paidSoFar < totalAmount) {
+            paymentStatus = 'Partially Paid';
+          } else {
+            paymentStatus = 'Fully Paid';
+          }
+
+          // Combine attendance and payment status
+          const combinedStatus =
+            paymentStatus === 'No Payment Required'
+              ? attendanceStatus
+              : `${attendanceStatus} - ${paymentStatus}`;
+
+          return {
+            ...appointment,
+            paymentStatus: combinedStatus,
+          };
+        });
+
+        setAppointments(enrichedAppointments);
       } catch (error) {
-        toast.error('Error fetching payments');
+        toast.error('Error fetching data');
         console.error(error);
       }
       setIsLoading(false);
     };
-    fetchAppointments();
+    fetchData();
   }, []);
 
   // Handle full payment processing
@@ -90,13 +129,16 @@ const PaymentManagerComponent = () => {
       const remainingAmount = appointment.payment - paidSoFar;
       const currentDate = formatDate(new Date());
       const paymentHistory = [...appointment.paymentHistory, { amount: remainingAmount, date: currentDate }];
+      const patient = patients.find((p) => p.name === appointment.patientName);
+      const newStatus = patient?.attended ? 'Fully Attended - Fully Paid' : 'Not Attended - Fully Paid';
+
       await updateDoc(appointmentRef, {
-        paymentStatus: 'Attended',
+        paymentStatus: newStatus,
         paymentDate: currentDate,
         paymentHistory,
       });
       setAppointments(appointments.map((app) =>
-        app.id === appointment.id ? { ...app, paymentStatus: 'Attended', paymentDate: currentDate, paymentHistory } : app
+        app.id === appointment.id ? { ...app, paymentStatus: newStatus, paymentDate: currentDate, paymentHistory } : app
       ));
       await createNotification(appointment, 'Payment Completed');
       toast.success(`Full payment processed for ${appointment.patientName}`);
@@ -121,24 +163,27 @@ const PaymentManagerComponent = () => {
       const totalPaid = paidSoFar + newPayment;
       const currentDate = formatDate(new Date());
       const paymentHistory = [...appointment.paymentHistory, { amount: newPayment, date: currentDate }];
-      const paymentStatus = totalPaid >= appointment.payment ? 'Attended' : 'Unattended';
+      const patient = patients.find((p) => p.name === appointment.patientName);
+      const attendanceStatus = patient?.attended ? 'Fully Attended' : 'Not Attended';
+      const paymentStatus = totalPaid >= appointment.payment ? 'Fully Paid' : 'Partially Paid';
+      const newStatus = `${attendanceStatus} - ${paymentStatus}`;
 
       await updateDoc(appointmentRef, {
         paymentHistory,
-        paymentStatus,
-        ...(paymentStatus === 'Attended' && { paymentDate: currentDate }),
+        paymentStatus: newStatus,
+        ...(totalPaid >= appointment.payment && { paymentDate: currentDate }),
       });
       setAppointments(appointments.map((app) =>
         app.id === appointment.id
           ? {
               ...app,
               paymentHistory,
-              paymentStatus,
-              ...(paymentStatus === 'Attended' && { paymentDate: currentDate }),
+              paymentStatus: newStatus,
+              ...(totalPaid >= appointment.payment && { paymentDate: currentDate }),
             }
           : app
       ));
-      if (paymentStatus === 'Attended') {
+      if (totalPaid >= appointment.payment) {
         await createNotification(appointment, 'Payment Completed');
       }
       toast.success(`Installment of KSh ${newPayment.toLocaleString()} processed for ${appointment.patientName}`);
@@ -166,16 +211,19 @@ const PaymentManagerComponent = () => {
         amount: parseFloat(editPaymentAmount),
       };
       const totalPaid = newPaymentHistory.reduce((sum, p) => sum + p.amount, 0);
-      const paymentStatus = totalPaid >= appointment.payment ? 'Attended' : 'Unattended';
+      const patient = patients.find((p) => p.name === appointment.patientName);
+      const attendanceStatus = patient?.attended ? 'Fully Attended' : 'Not Attended';
+      const paymentStatus = totalPaid >= appointment.payment ? 'Fully Paid' : totalPaid > 0 ? 'Partially Paid' : 'Unpaid';
+      const newStatus = `${attendanceStatus} - ${paymentStatus}`;
       const currentDate = formatDate(new Date());
 
       await updateDoc(appointmentRef, {
         paymentHistory: newPaymentHistory,
-        paymentStatus,
-        ...(paymentStatus === 'Attended' && !appointment.paymentDate && { paymentDate: currentDate }),
+        paymentStatus: newStatus,
+        ...(paymentStatus === 'Fully Paid' && !appointment.paymentDate && { paymentDate: currentDate }),
       });
       setAppointments(appointments.map((app) =>
-        app.id === appointment.id ? { ...app, paymentHistory: newPaymentHistory, paymentStatus } : app
+        app.id === appointment.id ? { ...app, paymentHistory: newPaymentHistory, paymentStatus: newStatus } : app
       ));
       toast.success(`Payment updated for ${appointment.patientName}`);
       setEditModal(null);
@@ -196,11 +244,14 @@ const PaymentManagerComponent = () => {
       const appointmentRef = doc(db, 'bershire dental records', appointment.id);
       const newPaymentHistory = appointment.paymentHistory.filter((_, i) => i !== index);
       const totalPaid = newPaymentHistory.reduce((sum, p) => sum + p.amount, 0);
-      const paymentStatus = totalPaid >= appointment.payment ? 'Attended' : 'Unattended';
+      const patient = patients.find((p) => p.name === appointment.patientName);
+      const attendanceStatus = patient?.attended ? 'Fully Attended' : 'Not Attended';
+      const paymentStatus = totalPaid >= appointment.payment ? 'Fully Paid' : totalPaid > 0 ? 'Partially Paid' : 'Unpaid';
+      const newStatus = `${attendanceStatus} - ${paymentStatus}`;
 
       await updateDoc(appointmentRef, {
         paymentHistory: newPaymentHistory,
-        paymentStatus,
+        paymentStatus: newStatus,
         ...(newPaymentHistory.length === 0 && { paymentDate: deleteField() }),
       });
       setAppointments(appointments.map((app) =>
@@ -208,7 +259,7 @@ const PaymentManagerComponent = () => {
           ? {
               ...app,
               paymentHistory: newPaymentHistory,
-              paymentStatus,
+              paymentStatus: newStatus,
               ...(newPaymentHistory.length === 0 && { paymentDate: null }),
             }
           : app
@@ -228,7 +279,7 @@ const PaymentManagerComponent = () => {
         type,
         appointmentId: appointment.id,
         message: `${appointment.patientName} - KSh ${appointment.payment.toLocaleString()} (${appointment.service})`,
-        timestamp: formatDate(new Date()), // Use formatted date for notifications
+        timestamp: formatDate(new Date()),
       });
     } catch (error) {
       console.error('Error creating notification:', error);
@@ -237,7 +288,7 @@ const PaymentManagerComponent = () => {
 
   // Handle print receipt
   const handlePrintReceipt = (appointment) => {
-    const logo = '🦷'; // Replace with your logo URL or base64 if available
+    const logo = '🦷';
     const paymentHistoryDetails = appointment.paymentHistory
       .map((p) => `Installment: KSh ${p.amount.toLocaleString()} - ${p.date}`)
       .join('\n');
@@ -296,8 +347,11 @@ const PaymentManagerComponent = () => {
           const remainingAmount = appointment.payment - paidSoFar;
           const currentDate = formatDate(new Date());
           const paymentHistory = [...appointment.paymentHistory, { amount: remainingAmount, date: currentDate }];
+          const patient = patients.find((p) => p.name === appointment.patientName);
+          const newStatus = patient?.attended ? 'Fully Attended - Fully Paid' : 'Not Attended - Fully Paid';
+
           await updateDoc(appointmentRef, {
-            paymentStatus: 'Attended',
+            paymentStatus: newStatus,
             paymentDate: currentDate,
             paymentHistory,
           });
@@ -308,7 +362,9 @@ const PaymentManagerComponent = () => {
         selectedAppointments.includes(app.id)
           ? {
               ...app,
-              paymentStatus: 'Attended',
+              paymentStatus: patients.find((p) => p.name === app.patientName)?.attended
+                ? 'Fully Attended - Fully Paid'
+                : 'Not Attended - Fully Paid',
               paymentDate: formatDate(new Date()),
               paymentHistory: [
                 ...app.paymentHistory,
@@ -358,7 +414,7 @@ const PaymentManagerComponent = () => {
       app.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.service.toLowerCase().includes(searchQuery.toLowerCase())
     )
-    .filter((app) => filterStatus === 'All' || app.paymentStatus === filterStatus);
+    .filter((app) => filterStatus === 'All' || app.paymentStatus.includes(filterStatus.split(' - ')[1] || filterStatus));
 
   // Pagination logic
   const indexOfLastItem = currentPage * itemsPerPage;
@@ -413,7 +469,7 @@ const PaymentManagerComponent = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <div className="input-group" style={{ maxWidth: '200px' }}>
+          <div className="input-group" style={{ maxWidth: '250px' }}>
             <span className="input-group-text"><FaFilter /></span>
             <select
               className="form-control rounded-pill"
@@ -421,8 +477,11 @@ const PaymentManagerComponent = () => {
               onChange={(e) => setFilterStatus(e.target.value)}
             >
               <option value="All">All Status</option>
-              <option value="Attended">Attended</option>
-              <option value="Unattended">Unattended</option>
+              <option value="Fully Attended">Fully Attended</option>
+              <option value="Not Attended">Not Attended</option>
+              <option value="Unpaid">Unpaid</option>
+              <option value="Partially Paid">Partially Paid</option>
+              <option value="Fully Paid">Fully Paid</option>
             </select>
           </div>
         </div>
@@ -448,7 +507,7 @@ const PaymentManagerComponent = () => {
                             if (e.target.checked) {
                               setSelectedAppointments(
                                 currentAppointments
-                                  .filter((app) => app.paymentStatus === 'Unattended')
+                                  .filter((app) => !app.paymentStatus.includes('Fully Paid'))
                                   .map((app) => app.id)
                               );
                             } else {
@@ -457,7 +516,7 @@ const PaymentManagerComponent = () => {
                           }}
                           checked={
                             selectedAppointments.length ===
-                              currentAppointments.filter((app) => app.paymentStatus === 'Unattended').length &&
+                              currentAppointments.filter((app) => !app.paymentStatus.includes('Fully Paid')).length &&
                             selectedAppointments.length > 0
                           }
                         />
@@ -477,6 +536,10 @@ const PaymentManagerComponent = () => {
                     {currentAppointments.map((appointment) => {
                       const paidAmount = appointment.paymentHistory.reduce((sum, p) => sum + p.amount, 0) || 0;
                       const remainingAmount = appointment.payment - paidAmount;
+                      const statusParts = appointment.paymentStatus.split(' - ');
+                      const attendanceStatus = statusParts[0];
+                      const paymentStatus = statusParts[1] || '';
+
                       return (
                         <tr key={appointment.id}>
                           <td>
@@ -484,7 +547,7 @@ const PaymentManagerComponent = () => {
                               type="checkbox"
                               checked={selectedAppointments.includes(appointment.id)}
                               onChange={() => toggleSelection(appointment.id)}
-                              disabled={appointment.paymentStatus !== 'Unattended'}
+                              disabled={paymentStatus === 'Fully Paid'}
                             />
                           </td>
                           <td>{appointment.patientName}</td>
@@ -495,7 +558,13 @@ const PaymentManagerComponent = () => {
                           <td>
                             <span
                               className={`badge ${
-                                appointment.paymentStatus === 'Attended' ? 'bg-success' : 'bg-warning'
+                                paymentStatus === 'Fully Paid'
+                                  ? 'bg-success'
+                                  : paymentStatus === 'Partially Paid'
+                                  ? 'bg-info'
+                                  : paymentStatus === 'Unpaid'
+                                  ? 'bg-warning'
+                                  : 'bg-secondary'
                               }`}
                             >
                               {appointment.paymentStatus}
@@ -532,7 +601,7 @@ const PaymentManagerComponent = () => {
                             >
                               <FaEye /> View
                             </button>
-                            {appointment.paymentStatus === 'Unattended' && remainingAmount > 0 ? (
+                            {paymentStatus !== 'Fully Paid' && remainingAmount > 0 ? (
                               <>
                                 <button
                                   className="btn btn-sm btn-warning rounded-pill px-3 me-2"

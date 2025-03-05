@@ -1,30 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { db } from './firebase';
 import { collection, getDocs, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
-import { FaUserMd, FaSearch, FaDownload, FaPlus, FaEdit, FaTrash, FaHistory, FaCheck, FaTimes } from 'react-icons/fa';
+import { FaUserMd, FaSearch, FaDownload, FaPlus, FaEdit, FaTrash, FaHistory } from 'react-icons/fa';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { Container, Row, Col, Card, Form, Button, Table, InputGroup, Dropdown, Pagination } from 'react-bootstrap';
 
 const PatientRecordsComponent = () => {
   const [patients, setPatients] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({ name: '', phone: '', email: '', notes: '', attended: false });
+  const [formData, setFormData] = useState({ name: '', phone: '', email: '', notes: '', attended: 'Not Attended' });
   const [editingId, setEditingId] = useState(null);
   const [timelinePatient, setTimelinePatient] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [recordsPerPage, setRecordsPerPage] = useState(5);
 
-  // Format date to "February 21, 2025 at 11:49:58 PM"
+  // Format date to "March 5, 2025 at 2:30:45 PM"
   const formatDate = (timestamp) => {
     if (!timestamp) return '';
-    // If timestamp is already a string in the expected format, return it as-is
     if (typeof timestamp === 'string' && /\w+ \d{1,2}, \d{4} at \d{1,2}:\d{2}:\d{2} (AM|PM)/.test(timestamp)) {
       return timestamp;
     }
-    // Handle Firestore Timestamp or other parseable date formats
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     if (isNaN(date.getTime())) {
       console.warn(`Invalid date detected: ${timestamp}`);
-      return 'Invalid Date'; // Fallback for unparseable dates
+      return 'Invalid Date';
     }
     const options = {
       year: 'numeric',
@@ -34,7 +35,7 @@ const PatientRecordsComponent = () => {
       minute: 'numeric',
       second: 'numeric',
       hour12: true,
-      timeZone: 'Africa/Nairobi' // UTC+3
+      timeZone: 'Africa/Nairobi',
     };
     return date.toLocaleString('en-US', options).replace(/,/, ' at');
   };
@@ -48,9 +49,9 @@ const PatientRecordsComponent = () => {
         const data = querySnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
-          attended: doc.data().attended ?? false, // Default to false if not present
+          attended: doc.data().attended ?? false, // Default to false for backward compatibility
           createdAt: doc.data().createdAt ? formatDate(doc.data().createdAt) : null,
-          updatedAt: doc.data().updatedAt ? formatDate(doc.data().updatedAt) : null
+          updatedAt: doc.data().updatedAt ? formatDate(doc.data().updatedAt) : null,
         }));
         setPatients(data);
       } catch (error) {
@@ -68,29 +69,31 @@ const PatientRecordsComponent = () => {
     setIsLoading(true);
     try {
       const currentDate = formatDate(new Date());
+      const attendedBool = formData.attended === 'Attended'; // Convert dropdown value to boolean for storage
+      const patientData = { ...formData, attended: attendedBool };
+
       if (editingId) {
         const patientRef = doc(db, 'patient_records', editingId);
         const oldPatient = patients.find(p => p.id === editingId);
-        await updateDoc(patientRef, { ...formData, updatedAt: currentDate });
-        setPatients(patients.map(p => (p.id === editingId ? { ...p, ...formData, updatedAt: currentDate } : p)));
+        await updateDoc(patientRef, { ...patientData, updatedAt: currentDate });
+        setPatients(patients.map(p => (p.id === editingId ? { ...p, ...patientData, updatedAt: currentDate } : p)));
         toast.success('Patient record updated');
-        // Trigger notification if attended status changed
-        if (oldPatient.attended !== formData.attended) {
+        if (oldPatient.attended !== attendedBool) {
           await addDoc(collection(db, 'notifications'), {
-            type: formData.attended ? 'Patient Attended' : 'Patient Unattended',
+            type: attendedBool ? 'Patient Attended' : 'Patient Unattended',
             patientId: editingId,
-            message: `${formData.name} - ${formData.attended ? 'Attended' : 'Unattended'}`,
+            message: `${formData.name} - ${attendedBool ? 'Attended' : 'Unattended'}`,
             timestamp: currentDate,
-            read: false
+            read: false,
           });
         }
         setEditingId(null);
       } else {
-        const docRef = await addDoc(collection(db, 'patient_records'), { ...formData, createdAt: currentDate });
-        setPatients([...patients, { id: docRef.id, ...formData, createdAt: currentDate }]);
+        const docRef = await addDoc(collection(db, 'patient_records'), { ...patientData, createdAt: currentDate });
+        setPatients([...patients, { id: docRef.id, ...patientData, createdAt: currentDate }]);
         toast.success('Patient record added');
       }
-      setFormData({ name: '', phone: '', email: '', notes: '', attended: false });
+      setFormData({ name: '', phone: '', email: '', notes: '', attended: 'Not Attended' });
     } catch (error) {
       toast.error('Error saving patient record');
       console.error(error);
@@ -105,7 +108,7 @@ const PatientRecordsComponent = () => {
       phone: patient.phone, 
       email: patient.email, 
       notes: patient.notes, 
-      attended: patient.attended 
+      attended: patient.attended ? 'Attended' : 'Not Attended' // Convert boolean to dropdown value
     });
     setEditingId(patient.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -125,27 +128,26 @@ const PatientRecordsComponent = () => {
     }
   };
 
-  // Toggle attended status
-  const handleToggleAttended = async (patient) => {
+  // Update attended status via dropdown
+  const handleStatusChange = async (id, newStatus) => {
     try {
-      const patientRef = doc(db, 'patient_records', patient.id);
-      const newAttendedStatus = !patient.attended;
+      const patientRef = doc(db, 'patient_records', id);
+      const attendedBool = newStatus === 'Attended';
       const currentDate = formatDate(new Date());
-      await updateDoc(patientRef, { attended: newAttendedStatus, updatedAt: currentDate });
+      await updateDoc(patientRef, { attended: attendedBool, updatedAt: currentDate });
       setPatients(patients.map(p => 
-        p.id === patient.id ? { ...p, attended: newAttendedStatus, updatedAt: currentDate } : p
+        p.id === id ? { ...p, attended: attendedBool, updatedAt: currentDate } : p
       ));
-      toast.success(`Patient marked as ${newAttendedStatus ? 'Attended' : 'Unattended'}`);
-      // Trigger notification
+      toast.success(`Patient marked as ${newStatus}`);
       await addDoc(collection(db, 'notifications'), {
-        type: newAttendedStatus ? 'Patient Attended' : 'Patient Unattended',
-        patientId: patient.id,
-        message: `${patient.name} - ${newAttendedStatus ? 'Attended' : 'Unattended'}`,
+        type: attendedBool ? 'Patient Attended' : 'Patient Unattended',
+        patientId: id,
+        message: `${patients.find(p => p.id === id).name} - ${newStatus}`,
         timestamp: currentDate,
-        read: false
+        read: false,
       });
     } catch (error) {
-      toast.error('Error updating attended status');
+      toast.error('Error updating status');
       console.error(error);
     }
   };
@@ -173,6 +175,13 @@ const PatientRecordsComponent = () => {
     p.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Pagination logic
+  const totalPages = Math.ceil(filteredPatients.length / recordsPerPage);
+  const paginatedPatients = filteredPatients.slice(
+    (currentPage - 1) * recordsPerPage,
+    currentPage * recordsPerPage
+  );
+
   // Patient Timeline
   const fetchPatientTimeline = async (patient) => {
     const appointmentsSnapshot = await getDocs(collection(db, 'bershire dental records'));
@@ -182,7 +191,7 @@ const PatientRecordsComponent = () => {
         return {
           id: doc.id,
           ...data,
-          date: formatDate(data.date) // Format appointment date
+          date: formatDate(data.date),
         };
       })
       .filter(a => a.patientName === patient.name)
@@ -191,171 +200,263 @@ const PatientRecordsComponent = () => {
   };
 
   return (
-    <div className="main-content" style={{ marginLeft: '280px', padding: '20px' }}>
+    <Container fluid className="main-content" style={{ marginLeft: '280px', padding: '20px' }}>
       <ToastContainer position="top-right" autoClose={3000} />
 
       {/* Header */}
-      <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
-        <h3 className="fw-bold text-primary">
-          <FaUserMd className="me-2" />
-          Patient Records
-        </h3>
-        <button className="btn btn-outline-success rounded-pill" onClick={exportToCSV}>
-          <FaDownload className="me-2" /> Export CSV
-        </button>
-      </div>
+      <Row className="mb-4 align-items-center">
+        <Col>
+          <h3 className="fw-bold text-primary d-flex align-items-center">
+            <FaUserMd className="me-2" />
+            Patient Records
+          </h3>
+        </Col>
+        <Col className="d-flex justify-content-end">
+          <Button variant="outline-success" className="rounded-pill" onClick={exportToCSV}>
+            <FaDownload className="me-2" /> Export CSV
+          </Button>
+        </Col>
+      </Row>
 
-      {/* Form */}
-      <div className="card shadow-sm mb-4 animate__animated animate__fadeIn">
-        <div className="card-body">
-          <h5>{editingId ? 'Edit Patient' : 'Add New Patient'}</h5>
-          <form onSubmit={handleSubmit}>
-            <div className="row g-3">
-              <div className="col-md-3">
-                <input
-                  type="text"
-                  className="form-control rounded-pill"
-                  placeholder="Name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="col-md-3">
-                <input
-                  type="tel"
-                  className="form-control rounded-pill"
-                  placeholder="Phone"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="col-md-3">
-                <input
-                  type="email"
-                  className="form-control rounded-pill"
-                  placeholder="Email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="col-md-3">
-                <div className="form-check mt-2">
-                  <input
-                    type="checkbox"
-                    className="form-check-input"
-                    id="attendedCheck"
-                    checked={formData.attended}
-                    onChange={(e) => setFormData({ ...formData, attended: e.target.checked })}
+      {/* Innovative Form */}
+      <Card className="shadow-sm mb-4 animate__animated animate__fadeIn futuristic-card">
+        <Card.Body>
+          <h5 className="text-center mb-4">{editingId ? 'Edit Patient Profile' : 'Add New Patient'}</h5>
+          <Form onSubmit={handleSubmit}>
+            <Row className="g-3 align-items-center">
+              <Col md={3}>
+                <InputGroup>
+                  <InputGroup.Text className="futuristic-input-icon"><FaUserMd /></InputGroup.Text>
+                  <Form.Control
+                    type="text"
+                    placeholder="Patient Name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
+                    className="rounded-pill futuristic-input"
                   />
-                  <label className="form-check-label" htmlFor="attendedCheck">
-                    Attended
-                  </label>
-                </div>
-              </div>
-              <div className="col-12">
-                <textarea
-                  className="form-control"
-                  placeholder="Notes (e.g., medical history)"
-                  rows="3"
+                </InputGroup>
+              </Col>
+              <Col md={3}>
+                <InputGroup>
+                  <InputGroup.Text className="futuristic-input-icon">📞</InputGroup.Text>
+                  <Form.Control
+                    type="tel"
+                    placeholder="Phone Number"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    required
+                    className="rounded-pill futuristic-input"
+                  />
+                </InputGroup>
+              </Col>
+              <Col md={3}>
+                <InputGroup>
+                  <InputGroup.Text className="futuristic-input-icon">✉️</InputGroup.Text>
+                  <Form.Control
+                    type="email"
+                    placeholder="Email Address"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    required
+                    className="rounded-pill futuristic-input"
+                  />
+                </InputGroup>
+              </Col>
+              <Col md={3}>
+                <Form.Select
+                  value={formData.attended}
+                  onChange={(e) => setFormData({ ...formData, attended: e.target.value })}
+                  className="rounded-pill futuristic-select"
+                >
+                  <option value="Not Attended">Not Attended</option>
+                  <option value="Attended">Attended</option>
+                </Form.Select>
+              </Col>
+              <Col xs={12}>
+                <Form.Control
+                  as="textarea"
+                  placeholder="Notes (e.g., medical history, allergies)"
+                  rows={3}
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  className="futuristic-textarea"
                 />
-              </div>
+              </Col>
+            </Row>
+            <div className="text-center mt-4">
+              <Button
+                type="submit"
+                variant="primary"
+                className="rounded-pill px-4 futuristic-btn"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <span className="spinner-border spinner-border-sm me-2" />
+                ) : (
+                  <FaPlus className="me-2" />
+                )}
+                {editingId ? 'Update Profile' : 'Add Patient'}
+              </Button>
             </div>
-            <button type="submit" className="btn btn-primary mt-3 rounded-pill px-4" disabled={isLoading}>
-              {isLoading ? <span className="spinner-border spinner-border-sm me-2" /> : <FaPlus className="me-2" />}
-              {editingId ? 'Update' : 'Add'} Patient
-            </button>
-          </form>
-        </div>
-      </div>
+          </Form>
+        </Card.Body>
+      </Card>
 
-      {/* Search and Table */}
-      <div className="card shadow-sm">
-        <div className="card-body">
-          <div className="input-group mb-3" style={{ maxWidth: '400px' }}>
-            <span className="input-group-text"><FaSearch /></span>
-            <input
-              type="text"
-              className="form-control rounded-pill"
-              placeholder="Search patients..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
+      {/* Search, Records Per Page, and Table */}
+      <Card className="shadow-sm">
+        <Card.Body>
+          <Row className="mb-3 flex-wrap gap-3 align-items-center">
+            <Col md={6} lg={4}>
+              <InputGroup>
+                <InputGroup.Text><FaSearch /></InputGroup.Text>
+                <Form.Control
+                  type="text"
+                  placeholder="Search patients..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="rounded-pill"
+                />
+              </InputGroup>
+            </Col>
+            <Col md={6} lg={4}>
+              <Form.Select
+                value={recordsPerPage}
+                onChange={(e) => {
+                  setRecordsPerPage(parseInt(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="rounded-pill"
+              >
+                <option value={5}>5 per page</option>
+                <option value={10}>10 per page</option>
+                <option value={20}>20 per page</option>
+                <option value={50}>50 per page</option>
+              </Form.Select>
+            </Col>
+          </Row>
+
           {isLoading ? (
             <div className="text-center py-5">
               <span className="spinner-border spinner-border-lg" />
             </div>
           ) : (
-            <div className="table-responsive">
-              <table className="table table-hover align-middle">
+            <>
+              <Table responsive hover className="align-middle">
                 <thead className="table-dark">
                   <tr>
                     <th>Name</th>
                     <th>Phone</th>
                     <th>Email</th>
                     <th>Notes</th>
-                    <th>Attended</th>
+                    <th>Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPatients.map(patient => (
+                  {paginatedPatients.map(patient => (
                     <tr key={patient.id} className="animate__animated animate__fadeIn">
                       <td>{patient.name}</td>
                       <td>{patient.phone}</td>
                       <td>{patient.email}</td>
                       <td>{patient.notes || '-'}</td>
                       <td>
-                        <button
-                          className={`btn btn-sm ${patient.attended ? 'btn-success' : 'btn-danger'} rounded-pill`}
-                          onClick={() => handleToggleAttended(patient)}
+                        <Dropdown
+                          onSelect={(eventKey) => handleStatusChange(patient.id, eventKey)}
                         >
-                          {patient.attended ? <FaCheck /> : <FaTimes />}
-                        </button>
+                          <Dropdown.Toggle
+                            variant={patient.attended ? 'success' : 'danger'}
+                            size="sm"
+                            className="rounded-pill"
+                          >
+                            {patient.attended ? 'Attended' : 'Not Attended'}
+                          </Dropdown.Toggle>
+                          <Dropdown.Menu>
+                            <Dropdown.Item eventKey="Attended">Attended</Dropdown.Item>
+                            <Dropdown.Item eventKey="Not Attended">Not Attended</Dropdown.Item>
+                          </Dropdown.Menu>
+                        </Dropdown>
                       </td>
                       <td>
-                        <button className="btn btn-sm btn-outline-primary me-2 rounded-pill" onClick={() => handleEdit(patient)}>
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          className="me-2 rounded-pill"
+                          onClick={() => handleEdit(patient)}
+                        >
                           <FaEdit />
-                        </button>
-                        <button className="btn btn-sm btn-outline-danger me-2 rounded-pill" onClick={() => handleDelete(patient.id)}>
+                        </Button>
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          className="me-2 rounded-pill"
+                          onClick={() => handleDelete(patient.id)}
+                        >
                           <FaTrash />
-                        </button>
-                        <button 
-                          className="btn btn-sm btn-outline-info rounded-pill" 
+                        </Button>
+                        <Button
+                          variant="outline-info"
+                          size="sm"
+                          className="rounded-pill"
                           onClick={() => fetchPatientTimeline(patient)}
                         >
                           <FaHistory /> Timeline
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
-            </div>
+              </Table>
+
+              {/* Pagination */}
+              <Row className="mt-3 align-items-center">
+                <Col className="d-flex justify-content-center">
+                  <Pagination>
+                    <Pagination.Prev
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      disabled={currentPage === 1}
+                    />
+                    {[...Array(totalPages)].map((_, i) => (
+                      <Pagination.Item
+                        key={i + 1}
+                        active={i + 1 === currentPage}
+                        onClick={() => setCurrentPage(i + 1)}
+                      >
+                        {i + 1}
+                      </Pagination.Item>
+                    ))}
+                    <Pagination.Next
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                      disabled={currentPage === totalPages}
+                    />
+                  </Pagination>
+                </Col>
+                <Col className="text-center">
+                  Showing {(currentPage - 1) * recordsPerPage + 1} to{' '}
+                  {Math.min(currentPage * recordsPerPage, filteredPatients.length)} of{' '}
+                  {filteredPatients.length} patients
+                </Col>
+              </Row>
+            </>
           )}
-        </div>
-      </div>
+        </Card.Body>
+      </Card>
 
       {/* Patient Timeline Modal */}
       {timelinePatient && (
         <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-lg modal-dialog-centered">
-            <div className="modal-content">
+            <div className="modal-content futuristic-modal">
               <div className="modal-header">
                 <h5 className="modal-title">{timelinePatient.name}'s Timeline</h5>
                 <button type="button" className="btn-close" onClick={() => setTimelinePatient(null)}></button>
               </div>
               <div className="modal-body">
-                <p><strong>Attended:</strong> {timelinePatient.attended ? 'Yes' : 'No'}</p>
+                <p><strong>Status:</strong> {timelinePatient.attended ? 'Attended' : 'Not Attended'}</p>
                 <div className="timeline">
                   {timelinePatient.appointments.map((appt, index) => (
                     <div key={appt.id} className="timeline-item">
-                      <div className="timeline-dot" style={{ backgroundColor: appt.paymentStatus === 'Attended' ? '#28a745' : '#dc3545' }}></div>
+                      <div className="timeline-dot" style={{ backgroundColor: appt.paymentStatus.includes('Fully Paid') ? '#28a745' : '#dc3545' }}></div>
                       <div className="timeline-content">
                         <p><strong>{appt.date}</strong> - {appt.service}</p>
                         <p>Status: {appt.paymentStatus} | Amount: KSh {appt.payment.toLocaleString()}</p>
@@ -365,31 +466,106 @@ const PatientRecordsComponent = () => {
                 </div>
               </div>
               <div className="modal-footer">
-                <button className="btn btn-secondary rounded-pill" onClick={() => setTimelinePatient(null)}>Close</button>
+                <Button className="rounded-pill futuristic-btn" onClick={() => setTimelinePatient(null)}>Close</Button>
               </div>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </Container>
   );
 };
 
-// Custom CSS
+// Custom CSS with Innovative Styling
 const styles = `
   .main-content {
     min-height: 100vh;
-    background-color: #f8f9fa;
+    background: linear-gradient(135deg, #f8f9fa, #e9ecef);
     width: calc(100% - 280px);
     transition: all 0.3s;
   }
-  .card { border: none; border-radius: 15px; transition: transform 0.2s; }
-  .card:hover { transform: translateY(-5px); }
-  .form-control, .btn { transition: all 0.3s; }
-  .form-control:focus { box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25); }
-  .rounded-pill { border-radius: 50rem !important; }
-  .table-hover tbody tr:hover { background-color: rgba(0, 0, 0, 0.05); }
-  .modal-content { border-radius: 15px; }
+  .futuristic-card {
+    border: none;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+  .futuristic-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+  }
+  .futuristic-input, .futuristic-select, .futuristic-textarea {
+    border: 1px solid #007bff33;
+    background: rgba(255, 255, 255, 0.8);
+    transition: all 0.3s ease;
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.05);
+  }
+  .futuristic-input:focus, .futuristic-select:focus, .futuristic-textarea:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 10px #007bff66, inset 0 2px 5px rgba(0, 0, 0, 0.05);
+    background: rgba(255, 255, 255, 1);
+  }
+  .futuristic-input-icon {
+    background: #007bff22;
+    border: none;
+    color: #007bff;
+  }
+  .futuristic-btn {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(90deg, #007bff, #0056b3);
+    color: white;
+    transition: all 0.3s ease;
+  }
+  .futuristic-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 15px #007bff66;
+    background: linear-gradient(90deg, #0056b3, #007bff);
+  }
+  .futuristic-btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.6s ease, height 0.6s ease;
+  }
+  .futuristic-btn:hover::after {
+    width: 200%;
+    height: 200%;
+  }
+  .futuristic-modal {
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  }
+  .card {
+    border: none;
+    border-radius: 15px;
+    transition: transform 0.2s;
+  }
+  .card:hover {
+    transform: translateY(-5px);
+  }
+  .form-control, .btn {
+    transition: all 0.3s;
+  }
+  .form-control:focus {
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+  }
+  .rounded-pill {
+    border-radius: 50rem !important;
+  }
+  .table-hover tbody tr:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+  }
   .timeline {
     position: relative;
     padding: 20px 0;
@@ -411,9 +587,16 @@ const styles = `
     padding: 10px;
     border-radius: 8px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+  }
+  .timeline-content:hover {
+    transform: scale(1.02);
   }
   @media (max-width: 768px) {
-    .main-content { margin-left: 0; width: 100%; }
+    .main-content {
+      margin-left: 0;
+      width: 100%;
+    }
   }
 `;
 

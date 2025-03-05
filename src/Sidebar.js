@@ -61,19 +61,25 @@ const Sidebar = () => {
     cosmic: { name: 'Cosmic', icon: '✨', description: 'Vibrant sci-fi aesthetic' }
   };
 
+  // Real-time listener for unread notifications
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'notifications'), (snapshot) => {
       const unreadCount = snapshot.docs.filter(doc => !doc.data().read).length;
       setNotificationsCount(unreadCount);
+      console.log(`Unread Notifications Count: ${unreadCount}`); // Debug log
+    }, (error) => {
+      console.error('Error fetching notifications:', error);
+      setNotificationsCount(0); // Fallback to 0 on error
     });
+
     return () => unsubscribe();
   }, []);
 
+  // Apply theme changes
   useEffect(() => {
-    // Apply theme to body and propagate to pages
     document.body.style.backgroundColor = chartColors[theme].background;
     document.body.style.color = chartColors[theme].text;
-    document.body.setAttribute('data-theme', theme); // For page-specific components to detect
+    document.body.setAttribute('data-theme', theme);
   }, [theme]);
 
   const handleLogout = async () => {
@@ -93,13 +99,12 @@ const Sidebar = () => {
       path: '/notifications', 
       icon: <FaBell />, 
       label: 'Notifications',
-      badge: notificationsCount > 0 ? notificationsCount : null
+      badge: notificationsCount > 0 ? notificationsCount : null // Show badge only if > 0
     },
   ];
 
   const patientMenu = [
     { path: '/patients/records', icon: <FaUserMd />, label: 'Patient Records' },
-    // Analytics removed from here
   ];
 
   const filteredMainMenu = mainMenu.filter(item => 
@@ -399,7 +404,7 @@ const Sidebar = () => {
             color: ${chartColors[theme].text}cc;
             margin-top: 5px;
             text-transform: uppercase;
-            letterSpacing: 1px;
+            letter-spacing: 1px;
           }
           .brand-logo {
             transition: transform 0.3s;
